@@ -13,6 +13,7 @@
 # db = database filename
 # compress = yes/zstd/lz4/lzma/zlib/no (optional, defaults to no)
 # unsafewrite = yes/no (optional, defaults to no. Disables fsync for faster bulk loading)
+# trusthash = yes/no (optional, defaults to no)
 #
 # To start client side
 # modprobe nbd max_part=8
@@ -29,7 +30,8 @@
 # v1.7 2026-05-13 Add extents + general tidy
 # v1.8 2026-05-14 Auto upgrade database for compression support
 # v1.9 2026-05-14 Add queue to pool db connections, move compress/hash code outside of db transaction
-# v2.0 2026-05-14 Multi-method compression support (Zstd, LZ4, LZMA, zlib), add unsafewrite flag or bulk loading performance
+# v2.0 2026-05-14 Multi-method compression support (Zstd, LZ4, LZMA, zlib), add unsafewrite flag for bulk loading performance
+# v2.1 2026-05-14 Expose trusthash as an option to make for easier enabling during bulk loading
 #
 
 import nbdkit
@@ -82,7 +84,7 @@ unsafewrite = False
 db_pool = queue.Queue()
 
 def config(key, value):
-    global filename, blocksize, blocks, compress, unsafewrite
+    global filename, blocksize, blocks, compress, unsafewrite, trustHash
     if key == "db":
         filename = os.path.abspath(value)
     elif key == "size":
@@ -120,6 +122,8 @@ def config(key, value):
             nbdkit.debug("ignored compress value %s" % value)
     elif key == "unsafewrite" and value == "yes":
         unsafewrite = True
+    elif key == "trusthash" and value == "yes":
+        trustHash = True
     else:
         nbdkit.debug("ignored parameter %s=%s" % (key, value))
 
