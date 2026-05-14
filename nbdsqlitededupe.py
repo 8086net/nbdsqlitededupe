@@ -26,6 +26,7 @@
 # v1.5 2024-03-03 Don't write all zero blocks
 # v1.6 2025-08-07 Use transactions/retries
 # v1.7 2026-05-13 Add extents + general tidy
+# v1.8 2026-05-14 Auto upgrade database for compression support
 #
 
 
@@ -107,6 +108,12 @@ def open(readonly):
 		c.execute("CREATE INDEX bh ON block(hash)")
 		c.execute("CREATE INDEX bc ON block(cnt)")
 		c.execute("CREATE INDEX mb ON mapper(block_id)")
+	except:
+		pass
+
+	# Try an auto upgrade for old databases without compression
+	try:
+		c.execute("ALTER TABLE block ADD COLUMN c INTEGER")
 	except:
 		pass
 
