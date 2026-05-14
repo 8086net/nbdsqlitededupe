@@ -25,7 +25,8 @@ Start nbd-server
 # To background remove "-f" and to disable debug messges remove "-v"
 # db = SQLite database filename
 # size = size in bytes of exported NBD device
-nbdkit -i localhost -v -f python3 /path/to/nbdsqlitededupe.py db=/path/to/database.sqlite3 size=1T
+# compress = yes to enable compression during writes (read always supports compression)
+nbdkit -i localhost -v -f python3 /path/to/nbdsqlitededupe.py db=/path/to/database.sqlite3 size=1T [compress=yes]
 # Load the NBD kernel module
 modprobe nbd max_part=8
 # Connect to the NBD server
