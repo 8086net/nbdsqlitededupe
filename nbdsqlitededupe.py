@@ -11,7 +11,8 @@
 #
 # size = number of bytes for the device
 # db = database filename
-# compress = yes/zstd/lz4/lzma/zlib/no (optional, defaults to no)
+# compress = yes/zstd/lz4/lzma/zlib/no (optional, defaults to no, yes=zstd)
+# compressionlevel = integer (optional, overrides default engine levels - zstd max=22, zlib max=9, lzma max=9)
 # unsafewrite = yes/no (optional, defaults to no. Disables fsync for faster bulk loading)
 # trusthash = yes/no (optional, defaults to no)
 #
@@ -32,6 +33,7 @@
 # v1.9 2026-05-14 Add queue to pool db connections, move compress/hash code outside of db transaction
 # v2.0 2026-05-14 Multi-method compression support (Zstd, LZ4, LZMA, zlib), add unsafewrite flag for bulk loading performance
 # v2.1 2026-05-14 Expose trusthash as an option to make for easier enabling during bulk loading
+# v2.2 2026-05-16 Add compressionlevel option to allow changes on startup for blocks compressed that session
 #
 
 import nbdkit
@@ -78,13 +80,14 @@ db = None
 blocks = None
 zero_chunk = None
 compress = 0 # 0=none, 1=zstd, 2=lz4, 3=lzma, 4=zlib
+compressionlevel = None
 minshrink = 128
 unsafewrite = False
 
 db_pool = queue.Queue()
 
 def config(key, value):
-    global filename, blocksize, blocks, compress, unsafewrite, trustHash
+    global filename, blocksize, blocks, compress, compressionlevel, unsafewrite, trustHash
     if key == "db":
         filename = os.path.abspath(value)
     elif key == "size":
@@ -120,6 +123,8 @@ def config(key, value):
             compress = 0
         else:
             nbdkit.debug("ignored compress value %s" % value)
+    elif key == "compressionlevel":
+        compressionlevel = int(value)
     elif key == "unsafewrite" and value == "yes":
         unsafewrite = True
     elif key == "trusthash" and value == "yes":
@@ -129,12 +134,32 @@ def config(key, value):
 
 
 def config_complete():
-    global filename
+    global filename, compressionlevel
 
     if filename is None:
         raise RuntimeError("file parameter is required")
     if blocks is None:
         raise RuntimeError("size parameter is required")
+
+    # Make sure level is within limits for compression method
+    if compress == 1: # zstd
+        if compressionlevel is None:
+            compressionlevel = 3
+        elif compressionlevel < 1 or compressionlevel > 22:
+            nbdkit.debug("compression level %d out of bounds for zstd (1-22), defaulting to 3" % compressionlevel)
+            compressionlevel = 3
+    elif compress == 3: # lzma
+        if compressionlevel is None:
+            compressionlevel = 6
+        elif compressionlevel < 0 or compressionlevel > 9:
+            nbdkit.debug("compression level %d out of bounds for lzma (0-9), defaulting to 6" % compressionlevel)
+            compressionlevel = 6
+    elif compress == 4: # zlib
+        if compressionlevel is None:
+            compressionlevel = -1
+        elif compressionlevel < -1 or compressionlevel > 9:
+            nbdkit.debug("compression level %d out of bounds for zlib (-1 to 9), defaulting to -1" % compressionlevel)
+            compressionlevel = -1
 
 
 def get_db():
@@ -229,7 +254,7 @@ def pread(h, buf, offset, flags):
                     elif b[2]==3: # lzma
                         buf[o:(o+blocksize)] = lzma.decompress(b[1])
                     elif b[2]==4: # zlib
-                        buf[o:(o+blocksize)] = zlib.decompress(b[1])
+                        buf[o:(o+blocksize)] = zlib.decompress(b[1], wbits=-12)
                     else:
                         buf[o:(o+blocksize)] = b[1]
                 done = True
@@ -245,7 +270,7 @@ def pread(h, buf, offset, flags):
 
 
 def pwrite(h, buf, offset, flags):
-    global blocksize, filename, trustHash, zero_chunk, compress, minshrink
+    global blocksize, filename, trustHash, zero_chunk, compress, compressionlevel, minshrink
 
     if len(buf) % blocksize:
         raise RuntimeError("length of buffer not divisible")
@@ -270,7 +295,7 @@ def pwrite(h, buf, offset, flags):
             is_compressed = 0
 
             if compress == 1: # zstd
-                zl = zstd.ZstdCompressor(level=3).compress(chunk)
+                zl = zstd.ZstdCompressor(level=compressionlevel, write_checksum=False, write_content_size=False).compress(chunk)
                 if (len(zl) + minshrink) < blocksize:
                     store_data = zl
                     is_compressed = 1
@@ -280,12 +305,12 @@ def pwrite(h, buf, offset, flags):
                     store_data = zl
                     is_compressed = 2
             elif compress == 3: # lzma
-                zl = lzma.compress(chunk)
+                zl = lzma.compress(chunk, preset=compressionlevel, check=lzma.CHECK_NONE)
                 if (len(zl) + minshrink) < blocksize:
                     store_data = zl
                     is_compressed = 3
             elif compress == 4: # zlib
-                zl = zlib.compress(chunk)
+                zl = zlib.compress(chunk, level=compressionlevel, wbits=-12)
                 if (len(zl) + minshrink) < blocksize:
                     store_data = zl
                     is_compressed = 4
