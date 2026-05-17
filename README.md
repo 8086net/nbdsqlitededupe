@@ -26,7 +26,10 @@ Start nbd-server
 # db = SQLite database filename
 # size = size in bytes of exported NBD device
 # compress = yes to enable compression during writes (read always supports compression)
-nbdkit -i localhost -v -f python3 /path/to/nbdsqlitededupe.py db=/path/to/database.sqlite3 size=1T [compress=yes]
+# compressionlevel = integer (optional, overrides default engine levels - zstd max=22, zlib max=9, lzma max=9)
+# unsafewrite = yes/no (optional, defaults to no. Disables fsync for faster bulk loading)
+# trusthash = yes/no (optional, defaults to no)
+nbdkit -i localhost -v -f python3 /path/to/nbdsqlitededupe.py db=/path/to/database.sqlite3 size=1T [compress=yes] [compressionlevel=3] [unsafewrite=no] [trusthash=no]
 # Load the NBD kernel module
 modprobe nbd max_part=8
 # Connect to the NBD server
@@ -48,7 +51,7 @@ Within the nbdsqlitededupe.py file there is a "trustHash" option, when set to Fa
 
 The SQLite database has two tables.
 
-The "block" table stores the actual data of the 4096 byte blocks and the SHA256 hash.
+The "block" table stores the actual data of the 4096 byte blocks and the SHA256 hash, the c field indicates if the row is compressed and by which method.
 
 The "mapper" table is used to map the devices block number to the backing "block" number which holds the data.
 
